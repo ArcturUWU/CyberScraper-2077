@@ -14,11 +14,22 @@ header {
     display: none;
 }
 
-.st-emotion-cache-uf99v8 {
-    display: none;
+/* Sidebar Styles */
+[data-testid="stSidebar"] {
+    visibility: visible !important;
+    display: block !important;
+    width: 330px !important;
+    min-width: 300px !important;
 }
 
-/* Sidebar Styles */
+[data-testid="stSidebar"] > div:first-child {
+    display: block !important;
+}
+
+[data-testid="collapsedControl"] {
+    display: none !important;
+}
+
 .stSidebar {
     padding: 1rem;
 }

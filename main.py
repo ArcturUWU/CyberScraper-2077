@@ -19,6 +19,38 @@ from urllib.parse import urlparse
 import atexit
 import os
 
+# Page config early to ensure sidebar expanded
+st.set_page_config(
+    page_title="CyberScraper 2077",
+    page_icon="app/icons/radiation.png",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Ensure Playwright can spawn subprocesses on Windows
+if os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
+def force_sidebar_open():
+    # Streamlit stores sidebar collapsed state in browser; this JS re-opens if collapsed
+    st.markdown(
+        """
+        <script>
+        const ensureSidebarOpen = () => {
+            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+            const toggle = window.parent.document.querySelector('[data-testid="collapsedControl"]');
+            if (sidebar && sidebar.style && sidebar.style.transform && sidebar.style.transform.includes('-100%') && toggle) {
+                toggle.click();
+            }
+        };
+        setTimeout(ensureSidebarOpen, 300);
+        setInterval(ensureSidebarOpen, 2000);
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def handle_oauth_callback():
     if 'code' in st.query_params:
         try:
@@ -57,6 +89,19 @@ def load_chat_history():
             return json.load(f, object_hook=deserialize_bytesio)
     except FileNotFoundError:
         return {}
+
+
+def decode_unicode_escapes(obj):
+    if isinstance(obj, str):
+        try:
+            return obj.encode("utf-8").decode("unicode_escape")
+        except Exception:
+            return obj
+    if isinstance(obj, list):
+        return [decode_unicode_escapes(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: decode_unicode_escapes(v) for k, v in obj.items()}
+    return obj
 
 def safe_process_message(web_scraper_chat, message):
     if message is None or message.strip() == "":
@@ -229,6 +274,11 @@ def render_message(role, content, avatar_path):
 
 def display_message_with_sheets_upload(message, message_index):
     content = message["content"]
+    if isinstance(content, (dict, list)):
+        decoded = decode_unicode_escapes(content)
+        pretty = json.dumps(decoded, ensure_ascii=False, indent=2)
+        st.code(pretty, language="json")
+        return
     if isinstance(content, (str, bytes, BytesIO)):
         data = extract_data_from_markdown(content)
         if data is not None:
@@ -274,6 +324,26 @@ def display_message_with_sheets_upload(message, message_index):
                 st.error(f"Error processing data: {str(e)}")
                 st.code(content)
         else:
+            # Pretty-print JSON payloads with Cyrillic preserved
+            if isinstance(content, str):
+                stripped = content.strip()
+                if stripped.startswith(("{", "[")):
+                    try:
+                        parsed = json.loads(stripped)
+                        parsed = decode_unicode_escapes(parsed)
+                        pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                        st.code(pretty, language="json")
+                        return
+                    except Exception:
+                        pass
+                # Fallback: decode escaped unicode if present
+                if "\\u" in stripped:
+                    try:
+                        decoded = decode_unicode_escapes(json.loads(f'"{stripped}"'))
+                        st.code(decoded, language="text")
+                        return
+                    except Exception:
+                        pass
             st.markdown(content)
     else:
         st.markdown(str(content))
@@ -285,12 +355,6 @@ def cleanup():
 atexit.register(cleanup)
 
 def main():
-
-    st.set_page_config(
-        page_title="CyberScraper 2077",
-        page_icon="app/icons/radiation.png",
-        layout="wide"
-    )
 
     load_css()
 
@@ -317,6 +381,8 @@ def main():
         st.session_state.selected_model = "gpt-4o-mini"
     if 'web_scraper_chat' not in st.session_state:
         st.session_state.web_scraper_chat = None
+    if 'ollama_models' not in st.session_state:
+        st.session_state.ollama_models = []
 
     with st.sidebar:
         st.title("Conversation History")
@@ -394,6 +460,37 @@ def main():
                                 st.session_state.current_chat_id = None
                             st.session_state.web_scraper_chat = None
                         st.rerun()
+
+    # Inline controls (fallback if sidebar hidden)
+    st.markdown("### Model & Controls")
+    inline_cols = st.columns([1.2, 1, 0.9])
+    with inline_cols[0]:
+        default_models = ["gpt-4o-mini", "gpt-3.5-turbo", "gemini-1.5-flash", "gemini-pro"]
+        ollama_models = st.session_state.get('ollama_models', [])
+        all_models = default_models + [f"ollama:{model}" for model in ollama_models]
+        selected_model_inline = st.selectbox(
+            "Choose a model (inline)",
+            all_models,
+            index=all_models.index(st.session_state.selected_model) if st.session_state.selected_model in all_models else 0,
+            key="inline_model_select",
+        )
+        if selected_model_inline != st.session_state.selected_model:
+            st.session_state.selected_model = selected_model_inline
+            st.session_state.web_scraper_chat = None
+            st.rerun()
+    with inline_cols[1]:
+        st.session_state.use_current_browser = st.checkbox(
+            "Use Current Browser",
+            value=st.session_state.get('use_current_browser', False),
+            help="Works natively; not supported in Docker.",
+            key="inline_use_current_browser"
+        )
+    with inline_cols[2]:
+        if st.button("Refresh Ollama Models", key="refresh_ollama_inline"):
+            with st.spinner("Fetching Ollama models..."):
+                st.session_state.ollama_models = asyncio.run(list_ollama_models())
+            st.success(f"Found {len(st.session_state.ollama_models)} Ollama models")
+            st.rerun()
 
     st.markdown(
         """

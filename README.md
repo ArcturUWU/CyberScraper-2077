@@ -1,5 +1,7 @@
 # 🌐 CyberScraper 2077
 
+> Актуальные правки и инструкция по запуску см. в `GUIDE.md`.
+
 <p align="center">
   <a href="https://www.thordata.com/?ls=VNSCxroa&lk=CyberScraper">
     <img src="https://i.postimg.cc/dtwTvm5V/728-x-90-2.gif" alt="Collect-web-data-728x90" border="0">
